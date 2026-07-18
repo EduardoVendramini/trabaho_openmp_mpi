@@ -1,15 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <omp.h>
+#include <time.h>
 
-#define NUM_BUCKETS 10000 // approximadamente 100 elementos por bucket para 1M elementos
+#define NUM_BUCKETS 10000
 
-// Função para encontrar o valor máximo em um array
 float findMax(float array[], int n)
 {
     float max = array[0];
-
-#pragma omp parallel for reduction(max : max)
     for (int i = 1; i < n; i++)
     {
         if (array[i] > max)
@@ -20,7 +18,6 @@ float findMax(float array[], int n)
     return max;
 }
 
-// Função para inserir um elemento no bucket
 void insertionSort(float bucket[], int n)
 {
     for (int i = 1; i < n; i++)
@@ -36,51 +33,50 @@ void insertionSort(float bucket[], int n)
     }
 }
 
-// Função para realizar o bucket sort
 void bucketSort(float array[], int n)
 {
-    // Encontrar o valor máximo no array
     float max = findMax(array, n);
 
-    int bucketSizes[NUM_BUCKETS];
+    // Arrays para guardar o tamanho e posições
+    int *bucketSizes = calloc(NUM_BUCKETS, sizeof(int));
+    int *currentPos = calloc(NUM_BUCKETS, sizeof(int));
 
-#pragma omp parallel for
-    for (int i = 0; i < NUM_BUCKETS; i++)
-        bucketSizes[i] = 0;
-
-    float **buckets = malloc(NUM_BUCKETS * sizeof(float *));
-    if (buckets == NULL)
-    {
-        perror("malloc");
-        exit(EXIT_FAILURE);
-    }
-
-#pragma omp parallel for
-    for (int i = 0; i < NUM_BUCKETS; i++)
-    {
-        buckets[i] = malloc(n * sizeof(float));
-        if (buckets[i] == NULL)
-        {
-            perror("malloc");
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    // Distribuir os elementos nos buckets
-#pragma omp parallel for
+    // 1. PASSO: Contar quantos elementos caem em cada bucket (Paralelo)
     for (int i = 0; i < n; i++)
     {
         int bucketIndex = (array[i] * NUM_BUCKETS) / (max + 1);
+        bucketSizes[bucketIndex]++;
+    }
 
+    float **buckets = malloc(NUM_BUCKETS * sizeof(float *));
+    if (buckets == NULL)
+        exit(EXIT_FAILURE);
+
+    // 2. PASSO: Alocar o tamanho EXATO para cada bucket
+    for (int i = 0; i < NUM_BUCKETS; i++)
+    {
+        if (bucketSizes[i] > 0)
+        {
+            buckets[i] = malloc(bucketSizes[i] * sizeof(float));
+            if (buckets[i] == NULL)
+                exit(EXIT_FAILURE);
+        }
+        else
+        {
+            buckets[i] = NULL;
+        }
+    }
+
+    // 3. PASSO: Distribuir os elementos (Paralelo)
+    for (int i = 0; i < n; i++)
+    {
+        int bucketIndex = (array[i] * NUM_BUCKETS) / (max + 1);
         int pos;
-
-#pragma omp atomic capture
-        pos = bucketSizes[bucketIndex]++;
-
+        pos = currentPos[bucketIndex]++;
         buckets[bucketIndex][pos] = array[i];
     }
 
-    // Ordenar cada bucket individualmente
+    // 4. PASSO: Ordenar cada bucket (Dinâmico pois os tamanhos variam)
     for (int i = 0; i < NUM_BUCKETS; i++)
     {
         if (bucketSizes[i] > 0)
@@ -89,29 +85,31 @@ void bucketSort(float array[], int n)
         }
     }
 
-    // Concatenar os buckets ordenados de volta no array original
-    int arrayIndex = 0;
+    // 5. PASSO: Calcular a posição de início de cada bucket para concatenação paralela (Prefix Sum)
+    int *prefixSums = malloc(NUM_BUCKETS * sizeof(int));
+    prefixSums[0] = 0;
+    for (int i = 1; i < NUM_BUCKETS; i++)
+    {
+        prefixSums[i] = prefixSums[i - 1] + bucketSizes[i - 1];
+    }
+
+    // 6. PASSO: Concatenar os resultados no array original (Paralelo)
     for (int i = 0; i < NUM_BUCKETS; i++)
     {
         for (int j = 0; j < bucketSizes[i]; j++)
         {
-            array[arrayIndex++] = buckets[i][j];
+            array[prefixSums[i] + j] = buckets[i][j];
         }
     }
 
+    // Liberar memória
     for (int i = 0; i < NUM_BUCKETS; i++)
-        free(buckets[i]);
-
+        if (buckets[i] != NULL)
+            free(buckets[i]);
     free(buckets);
-}
-
-void printArray(float array[], int n)
-{
-    for (int i = 0; i < n; i++)
-    {
-        printf("%.2f ", array[i]);
-    }
-    printf("\n");
+    free(bucketSizes);
+    free(currentPos);
+    free(prefixSums);
 }
 
 int readFile(const char *filename, float **array)
@@ -124,10 +122,20 @@ int readFile(const char *filename, float **array)
     }
 
     int n = 0;
+    int capacity = 10000; // Começa com uma capacidade razoável
+    *array = malloc(capacity * sizeof(float));
+
     while (fscanf(file, "%f", &(*array)[n]) == 1)
     {
         n++;
-        *array = realloc(*array, sizeof(float) * (n + 1));
+        // Dobra a capacidade apenas quando necessário (MUITO mais rápido)
+        if (n >= capacity)
+        {
+            capacity *= 2;
+            *array = realloc(*array, capacity * sizeof(float));
+            if (*array == NULL)
+                exit(EXIT_FAILURE);
+        }
     }
     fclose(file);
     return n;
@@ -137,42 +145,42 @@ void exportArrayToFile(float *array, int n, const char *filename)
 {
     FILE *file = fopen(filename, "w");
     if (file == NULL)
-    {
-        printf("Erro ao criar o arquivo de saída!\n");
         return;
-    }
 
     for (int i = 0; i < n; i++)
-    {
         fprintf(file, "%.2f\n", array[i]);
-    }
 
     fclose(file);
 }
 
+double get_time_diff(struct timespec start, struct timespec end)
+{
+    return (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+}
+
 int main()
 {
-    omp_set_num_threads(8);
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
-    float *array = malloc(sizeof(float) * 1);
-    // const char *filename = "dados.txt";
-    const char *filename = "./data/1M_dados_aleatorios.txt";
+    float *array = NULL;
+    const char *filename = "./data/1000000_random_data.txt";
 
     int n = readFile(filename, &array);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("Tempo de leitura do arquivo: %.6f segundos\n", get_time_diff(start, end));
     if (n == -1)
-    {
         return 1;
-    }
 
-    printf("Array original: \n");
-    printArray(array, 10);
-
+    clock_gettime(CLOCK_MONOTONIC, &start);
     bucketSort(array, n);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("Tempo de ordenação: %.6f segundos\n", get_time_diff(start, end));
 
-    // printf("Array ordenado: \n");
-    // printArray(array, 10);
-
-    exportArrayToFile(array, n, "./data/1M_dados_aleatorios_ordenados.txt");
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    exportArrayToFile(array, n, "./data/1000000_sorted_random_data.txt");
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("Tempo de exportação do arquivo: %.6f segundos\n", get_time_diff(start, end));
 
     free(array);
     return 0;
