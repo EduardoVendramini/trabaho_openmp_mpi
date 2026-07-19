@@ -32,6 +32,7 @@ void friendly_numbers(long int start, long int end)
 	long int i, j, factor, ii, sum, done, n;
 
 	clock_gettime(CLOCK_MONOTONIC, &start_time);
+#pragma omp parallel for private(ii, sum, done, factor, n)
 	for (i = start; i <= end; i++)
 	{
 		ii = i - start;
@@ -60,7 +61,7 @@ void friendly_numbers(long int start, long int end)
 
 	clock_gettime(CLOCK_MONOTONIC, &start_time);
 	long int num_of_friendly_numbers = 0;
-	
+
 #pragma omp parallel for private(j) reduction(+ : num_of_friendly_numbers)
 	for (i = 0; i < last; i++)
 	{
@@ -69,7 +70,13 @@ void friendly_numbers(long int start, long int end)
 			if ((num[i] == num[j]) && (den[i] == den[j]))
 			{
 				num_of_friendly_numbers++;
-				// printf("%ld and %ld are FRIENDLY\n", the_num[i], the_num[j]);
+				/*
+#pragma omp critical
+				{
+					printf("%ld and %ld are FRIENDLY\n",
+						   the_num[i], the_num[j]);
+				}
+				*/
 			}
 		}
 	}
