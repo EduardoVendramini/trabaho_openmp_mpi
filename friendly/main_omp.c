@@ -70,8 +70,7 @@ void friendly_numbers(long int start, long int end)
 			if ((num[i] == num[j]) && (den[i] == den[j]))
 			{
 				num_of_friendly_numbers++;
-				printf("%ld and %ld are FRIENDLY\n",
-					   the_num[i], the_num[j]);
+				// printf("%ld and %ld are FRIENDLY\n", the_num[i], the_num[j]);
 			}
 		}
 	}
