@@ -70,13 +70,8 @@ void friendly_numbers(long int start, long int end)
 			if ((num[i] == num[j]) && (den[i] == den[j]))
 			{
 				num_of_friendly_numbers++;
-				/*
-#pragma omp critical
-				{
-					printf("%ld and %ld are FRIENDLY\n",
-						   the_num[i], the_num[j]);
-				}
-				*/
+				printf("%ld and %ld are FRIENDLY\n",
+					   the_num[i], the_num[j]);
 			}
 		}
 	}
@@ -93,6 +88,7 @@ int main(int argc, char **argv)
 {
 	long int start = 1;
 	long int end = 262143;
+	// long int end = 1000;
 
 	printf("Number %ld to %ld\n", start, end);
 	friendly_numbers(start, end);
