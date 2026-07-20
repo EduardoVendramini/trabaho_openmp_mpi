@@ -1,19 +1,21 @@
-FLAGS=-O2
+CC       = gcc
+OMPFLAGS = -fopenmp
 
-CC=gcc
+TARGETS  = main main_omp
 
-RM=rm -f
+run: $(TARGETS)
+	@echo "=== Executando versão sequencial ==="
+	time -p ./main
+	@echo "\n=== Executando versão OpenMP (OMP_NUM_THREADS=8) ==="
+	export OMP_NUM_THREADS=8 && time -p ./main_omp
 
-EXEC=friendly
+main: main.c
+	$(CC) -o $@ $<
 
-all: $(EXEC)
-
-$(EXEC):
-	$(CC) $(FLAGS) $(EXEC).c -c -o $(EXEC).o
-	$(CC) $(FLAGS) $(EXEC).o -o $(EXEC)
-
-run:
-	./$(EXEC)
+main_omp: main_omp.c
+	$(CC) $(OMPFLAGS) -o $@ $<
 
 clean:
-	$(RM) $(EXEC).o $(EXEC)
+	rm -f $(TARGETS)
+
+.PHONY: run clean
