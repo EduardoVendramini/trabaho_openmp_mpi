@@ -18,15 +18,26 @@ int gcd(int u, int v)
 	return gcd(v, u % v);
 }
 
-void compute_fractions(long int start, long int end,
-					   long int *the_num, long int *num, long int *den)
+void friendly_numbers(long int start, long int end)
 {
-	long int i, factor, done, sum, n;
-	long int idx = 0;
+	long int last = end - start + 1;
 
+	long int *the_num;
+	the_num = (long int *)malloc(sizeof(long int) * last);
+	long int *num;
+	num = (long int *)malloc(sizeof(long int) * last);
+	long int *den;
+	den = (long int *)malloc(sizeof(long int) * last);
+
+	long int i, j, factor, ii, sum, done, n;
+
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	// ------------ aqui ----------------
 	for (i = start; i <= end; i++)
 	{
+		ii = i - start;
 		sum = 1 + i;
+		the_num[ii] = i;
 		done = i;
 		factor = 2;
 		while (factor < done)
@@ -39,146 +50,45 @@ void compute_fractions(long int start, long int end,
 			}
 			factor++;
 		}
-		the_num[idx] = i;
-		num[idx] = sum;
-		den[idx] = i;
-		n = gcd(num[idx], den[idx]);
-		num[idx] /= n;
-		den[idx] /= n;
-		idx++;
-	}
-}
+		num[ii] = sum;
+		den[ii] = i;
+		n = gcd(num[ii], den[ii]);
+		num[ii] /= n;
+		den[ii] /= n;
+	} // end for
+	clock_gettime(CLOCK_MONOTONIC, &end_time);
+	printf("Tempo para identificar os números amigáveis: %.6f segundos\n", get_time_diff(start_time, end_time));
 
-void friendly_numbers_parallel(long int start, long int end, int rank, int size)
-{
-	long int N = end - start + 1;
-
-	long int local_start, local_end;
-	int local_count;
-	long int base_count = N / size;
-	int remainder = N % size;
-
-	if (rank < remainder)
+	// ------------ aqui ----------------
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	long int num_of_friendly_numbers = 0;
+	for (i = 0; i < last; i++)
 	{
-		local_count = base_count + 1;
-		local_start = start + rank * local_count;
-	}
-	else
-	{
-		local_count = base_count;
-		local_start = start + remainder * (base_count + 1) + (rank - remainder) * base_count;
-	}
-	local_end = local_start + local_count - 1;
-
-	/* Arrays locais */
-	long int *local_the_num = (long int *)malloc(local_count * sizeof(long int));
-	long int *local_num = (long int *)malloc(local_count * sizeof(long int));
-	long int *local_den = (long int *)malloc(local_count * sizeof(long int));
-
-	/* ---- Cálculo paralelo das frações ---- */
-	MPI_Barrier(MPI_COMM_WORLD);
-	double t_start = MPI_Wtime();
-
-	compute_fractions(local_start, local_end, local_the_num, local_num, local_den);
-
-	MPI_Barrier(MPI_COMM_WORLD);
-	double t_end = MPI_Wtime();
-	double elapsed = t_end - t_start;
-
-	double max_time;
-	MPI_Reduce(&elapsed, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-
-	if (rank == 0)
-	{
-		printf("Tempo para identificar os números amigáveis (paralelo): %.6f segundos\n", max_time);
-	}
-
-	/* ---- Reúne os dados no processo raiz ---- */
-	int *recv_counts = NULL;
-	int *displs = NULL;
-	long int *all_the_num = NULL, *all_num = NULL, *all_den = NULL;
-
-	if (rank == 0)
-	{
-		recv_counts = (int *)malloc(size * sizeof(int));
-		displs = (int *)malloc(size * sizeof(int));
-
-		int total = 0;
-		for (int p = 0; p < size; p++)
+		for (j = i + 1; j < last; j++)
 		{
-			int cnt = (p < remainder) ? base_count + 1 : base_count;
-			recv_counts[p] = cnt;
-			displs[p] = total;
-			total += cnt;
-		}
-
-		all_the_num = (long int *)malloc(N * sizeof(long int));
-		all_num = (long int *)malloc(N * sizeof(long int));
-		all_den = (long int *)malloc(N * sizeof(long int));
-	}
-
-	MPI_Gatherv(local_the_num, local_count, MPI_LONG,
-				all_the_num, recv_counts, displs, MPI_LONG,
-				0, MPI_COMM_WORLD);
-	MPI_Gatherv(local_num, local_count, MPI_LONG,
-				all_num, recv_counts, displs, MPI_LONG,
-				0, MPI_COMM_WORLD);
-	MPI_Gatherv(local_den, local_count, MPI_LONG,
-				all_den, recv_counts, displs, MPI_LONG,
-				0, MPI_COMM_WORLD);
-
-	free(local_the_num);
-	free(local_num);
-	free(local_den);
-
-	/* ---- Comparação final (somente no raiz, igual ao original) ---- */
-	if (rank == 0)
-	{
-		clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-		long int num_of_friendly_numbers = 0;
-		for (long int i = 0; i < N; i++)
-		{
-			for (long int j = i + 1; j < N; j++)
+			if ((num[i] == num[j]) && (den[i] == den[j]))
 			{
-				if ((all_num[i] == all_num[j]) && (all_den[i] == all_den[j]))
-				{
-					num_of_friendly_numbers++;
-					printf("%ld and %ld are FRIENDLY\n", all_the_num[i], all_the_num[j]);
-				}
+				num_of_friendly_numbers++;
+				// printf("%ld and %ld are FRIENDLY\n", the_num[i], the_num[j]);
 			}
 		}
-
-		clock_gettime(CLOCK_MONOTONIC, &end_time);
-		printf("Number of friendly numbers: %ld\n", num_of_friendly_numbers);
-		printf("Tempo para somar a quantidade de números amigáveis: %.6f segundos\n",
-			   get_time_diff(start_time, end_time));
-
-		free(all_the_num);
-		free(all_num);
-		free(all_den);
-		free(recv_counts);
-		free(displs);
 	}
+	clock_gettime(CLOCK_MONOTONIC, &end_time);
+	printf("Number of friendly numbers: %ld\n", num_of_friendly_numbers);
+	printf("Tempo para somar a quantidade de números amigáveis: %.6f segundos\n", get_time_diff(start_time, end_time));
+
+	free(the_num);
+	free(num);
+	free(den);
 }
 
 int main(int argc, char **argv)
 {
-	int rank, size;
 	long int start = 1;
 	long int end = 262143;
 
-	MPI_Init(&argc, &argv);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Comm_size(MPI_COMM_WORLD, &size);
+	printf("Number %ld to %ld\n", start, end);
+	friendly_numbers(start, end);
 
-	if (rank == 0)
-	{
-		printf("Number %ld to %ld\n", start, end);
-	}
-
-	friendly_numbers_parallel(start, end, rank, size);
-
-	MPI_Finalize();
 	return EXIT_SUCCESS;
 }
